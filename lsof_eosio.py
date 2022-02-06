@@ -1,6 +1,9 @@
 import re
 import subprocess
 import collectd
+import socket
+
+HOSTNAME = str(socket.gethostname())
 
 HTTP_PORT = '8888'
 current_links = ""  
@@ -18,8 +21,6 @@ def init():
     retstr = str(ret)
     nodeos_pid_match = re.match(re4, retstr)
     nodeos_pid = nodeos_pid_match.group(1)
-
-
 
 
 def config_func(config):
@@ -48,16 +49,18 @@ def read_func():
     count = 0
     links = ""
     ret = subprocess.getoutput(["lsof", "-nP", "-p", str(nodeos_pid) ])
+    # Build regex using hostname
+    my_regex = r".*TCP " + re.escape(HOSTNAME) + r".*"
+    print(my_regex)
     lines = ret.split("\n")
     for line in lines:
         # Search for TCP connections matching your hostname
-        if re.match(r'.*TCP block-producer.*', line):
+        if re.match(my_regex, line):
             count += 1
             cols = re.split(r" +", line)
             links += cols[len(cols) - 2] + "\n"
     current_linknum = count
     current_links = links
-
     # Dispatch value to collectd
     val = collectd.Values(type='tcp_connections')
     val.plugin = 'lsof_eosio'
