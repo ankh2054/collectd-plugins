@@ -8,7 +8,7 @@
 #
 # Modified by "Warren Turkal" <wt@signalfuse.com>, "Volodymyr Zhabiuk" <vzhabiuk@signalfx.com>
 
-from io import StringIO
+import cStringIO as StringIO
 import socket
 import csv
 import pprint
@@ -18,113 +18,26 @@ import collectd
 PLUGIN_NAME = 'haproxy'
 RECV_SIZE = 1024
 
-DEFAULT_METRICS = {
-    'ConnRate': ('connection_rate', 'gauge'),
-    'CumReq': ('requests', 'derive'),
-    'Idle_pct': ('idle_pct', 'gauge'),
-    'scur': ('session_current', 'gauge'),
-    'SessRate': ('session_rate_all', 'gauge'),
-    'lbtot': ('server_selected_total', 'counter'),
-    'bout': ('bytes_out', 'derive'),
-    'bin': ('bytes_in', 'derive'),
-    'ttime': ('session_time_avg', 'gauge'),
-    'req_rate': ('request_rate', 'gauge'),
-    'rate': ('session_rate', 'gauge'),
-    'hrsp_2xx': ('response_2xx', 'derive'),
-    'hrsp_4xx': ('response_4xx', 'derive'),
-    'hrsp_5xx': ('response_5xx', 'derive'),
-    'ereq': ('error_request', 'derive'),
-    'dreq': ('denied_request', 'derive'),
-    'econ': ('error_connection', 'derive'),
-    'dresp': ('denied_response', 'derive'),
-    'qcur': ('queue_current', 'gauge'),
-    'qtime': ('queue_time_avg', 'gauge'),
-    'rtime': ('response_time_avg', 'gauge'),
-    'eresp': ('error_response', 'derive'),
-    'wretr': ('retries', 'derive'),
-    'wredis': ('redispatched', 'derive'),
+METRICS_TO_COLLECT = {
+    'ConnRate': 'gauge', 'CumReq': 'derive', 'Idle_pct': 'gauge', 'scur': 'gauge', 'SessRate': 'gauge',
+    'lbtot': 'counter', 'bout': 'derive', 'bin': 'derive', 'ttime': 'gauge', 'req_rate': 'gauge', 'rate': 'gauge',
+    'hrsp_2xx': 'derive', 'hrsp_4xx': 'derive', 'hrsp_5xx': 'derive', 'ereq': 'derive', 'dreq': 'derive',
+    'econ': 'derive', 'dresp': 'derive', 'qcur': 'gauge', 'qtime': 'gauge', 'rtime': 'gauge', 'eresp': 'derive',
+    'wretr': 'derive', 'wredis': 'derive', 'MaxConn': 'gauge', 'CumConns': 'derive', 'MaxConnRate': 'gauge',
+    'MaxSessRate': 'gauge', 'MaxSslConns': 'gauge', 'CumSslConns': 'derive', 'MaxPipes': 'gauge', 'Tasks': 'gauge',
+    'Run_queue': 'gauge', 'PipesUsed': 'gauge', 'PipesFree': 'gauge', 'Uptime_sec': 'derive', 'CurrConns': 'gauge',
+    'CurrSslConns': 'gauge', 'SslRate': 'gauge', 'SslFrontendKeyRate': 'gauge', 'SslBackendKeyRate': 'gauge',
+    'SslCacheLookups': 'derive', 'SslCacheMisses': 'derive', 'CompressBpsIn': 'derive', 'CompressBpsOut': 'derive',
+    'ZlibMemUsage': 'gauge', 'chkfail': 'derive', 'downtime': 'derive', 'hrsp_1xx': 'derive', 'hrsp_3xx': 'derive',
+    'hrsp_other': 'derive', 'qmax': 'gauge', 'qlimit': 'gauge', 'rate_lim': 'gauge', 'rate_max': 'gauge',
+    'req_rate_max': 'gauge', 'stot': 'derive', 'slim': 'gauge', 'smax': 'gauge', 'throttle': 'gauge',
+    'cli_abrt': 'derive', 'srv_abrt': 'derive', 'comp_in': 'derive', 'comp_out': 'derive', 'comp_byp': 'derive',
+    'comp_rsp': 'derive', 'ctime': 'gauge', 'act': 'gauge', 'bck': 'gauge', 'check_duration': 'gauge',
+    'lastsess': 'gauge', 'conn_rate': 'gauge', 'conn_rate_max': 'gauge', 'conn_tot': 'counter', 'intercepted': 'gauge',
+    'dcon': 'gauge', 'dses': 'gauge', 'sent': 'gauge', 'snd_error': 'gauge', 'valid': 'gauge', 'update': 'gauge',
+    'cname': 'gauge', 'cname_error': 'gauge', 'any_err': 'gauge', 'nx': 'gauge', 'timeout': 'gauge', 'refused': 'gauge',
+    'other': 'gauge', 'invalid': 'gauge', 'too_big': 'gauge', 'truncated': 'gauge', 'outdated': 'gauge'
 }
-
-ENHANCED_METRICS = {
-    # Metrics that are collected for the whole haproxy instance.
-    # The format is  haproxy_metricname : {'signalfx_corresponding_metric': 'collectd_type'}
-    # Currently signalfx_corresponding_metric match haproxy_metricname
-    # Correspond to 'show info' socket command
-    'MaxConn': ('max_connections', 'gauge'),
-    'CumConns': ('connections', 'derive'),
-    'MaxConnRate': ('max_connection_rate', 'gauge'),
-    'MaxSessRate': ('max_session_rate', 'gauge'),
-    'MaxSslConns': ('max_ssl_connections', 'gauge'),
-    'CumSslConns': ('ssl_connections', 'derive'),
-    'MaxPipes': ('max_pipes', 'gauge'),
-    'Tasks': ('tasks', 'gauge'),
-    'Run_queue': ('run_queue', 'gauge'),
-    'PipesUsed': ('pipes_used', 'gauge'),
-    'PipesFree': ('pipes_free', 'gauge'),
-    'Uptime_sec': ('uptime_seconds', 'derive'),
-    'CurrConns': ('current_connections', 'gauge'),
-    'CurrSslConns': ('current_ssl_connections', 'gauge'),
-    'SslRate': ('ssl_rate', 'gauge'),
-    'SslFrontendKeyRate': ('ssl_frontend_key_rate', 'gauge'),
-    'SslBackendKeyRate': ('ssl_backend_key_rate', 'gauge'),
-    'SslCacheLookups': ('ssl_cache_lookups', 'derive'),
-    'SslCacheMisses': ('ssl_cache_misses', 'derive'),
-    'CompressBpsIn': ('compress_bps_in', 'derive'),
-    'CompressBpsOut': ('compress_bps_out', 'derive'),
-    'ZlibMemUsage': ('zlib_mem_usage', 'gauge'),
-
-    # Metrics that are collected per each proxy separately.
-    # Proxy name would be the dimension as well as service_name
-    # Correspond to 'show stats' socket command
-    'chkfail': ('failed_checks', 'derive'),
-    'downtime': ('downtime', 'derive'),
-    'hrsp_1xx': ('response_1xx', 'derive'),
-    'hrsp_3xx': ('response_3xx', 'derive'),
-    'hrsp_other': ('response_other', 'derive'),
-    'qmax': ('queue_max', 'gauge'),
-    'qlimit': ('queue_limit', 'gauge'),
-    'rate_lim': ('session_rate_limit', 'gauge'),
-    'rate_max': ('session_rate_max', 'gauge'),
-    'req_rate_max': ('request_rate_max', 'gauge'),
-    'stot': ('session_total', 'derive'),
-    'slim': ('session_limit', 'gauge'),
-    'smax': ('session_max', 'gauge'),
-    'throttle': ('throttle', 'gauge'),
-    'cli_abrt': ('cli_abrt', 'derive'),
-    'srv_abrt': ('srv_abrt', 'derive'),
-    'comp_in': ('comp_in', 'derive'),
-    'comp_out': ('comp_out', 'derive'),
-    'comp_byp': ('comp_byp', 'derive'),
-    'comp_rsp': ('comp_rsp', 'derive'),
-    'ctime': ('connect_time_avg', 'gauge'),
-    'act': ('active_servers', 'gauge'),
-    'bck': ('backup_servers', 'gauge'),
-    'check_duration': ('health_check_duration', 'gauge'),
-    'lastsess': ('last_session', 'gauge'),
-    'conn_rate': ('conn_rate', 'gauge'),
-    'conn_rate_max': ('conn_rate_max', 'gauge'),
-    'conn_tot': ('conn_total', 'counter'),
-    'intercepted': ('intercepted', 'gauge'),
-    'dcon': ('denied_tcp_conn', 'gauge'),
-    'dses': ('denied_tcp_sess', 'gauge'),
-}
-
-DIMENSIONS_LIST = [
-    'pxname',
-    'svname',
-    'pid',
-    'sid',
-    'iid',
-    'type',
-    'addr',
-    'cookie',
-    'mode',
-    'algo',
-]
-
-DEFAULT_METRICS = dict((k.lower(), v) for k, v in DEFAULT_METRICS.items())
-ENHANCED_METRICS = dict((k.lower(), v) for k, v in ENHANCED_METRICS.items())
-METRIC_DELIM = '.'  # for the frontend/backend stats
 
 DEFAULT_SOCKET = '/var/run/haproxy.sock'
 DEFAULT_PROXY_MONITORS = ['server', 'frontend', 'backend']
@@ -170,7 +83,7 @@ class HAProxySocket(object):
         if stat_sock is None:
             return ''
         stat_sock.sendall(command)
-        result_buf = StringIO()
+        result_buf = StringIO.StringIO()
         buf = stat_sock.recv(RECV_SIZE)
         while buf:
             result_buf.write(buf)
@@ -178,6 +91,40 @@ class HAProxySocket(object):
 
         stat_sock.close()
         return result_buf.getvalue()
+
+    # This method isn't nice but there's no other way to parse the output of show resolvers from haproxy
+    def get_resolvers(self):
+        ''' Gets the resolver config and returns a map of nameserver -> nameservermetrics
+        The output from the socket looks like
+        Resolvers section mydns
+         nameserver dns1:
+          sent:        8
+          ...
+
+        :return:
+        map of nameserver -> nameservermetrics
+        e.g. '{dns1': {'sent': '8', ...}, ...}
+        '''
+        result = {}
+        output = self.communicate('show resolvers')
+        nameserver = ''
+        for line in output.splitlines():
+            try:
+                if 'Resolvers section' in line or line.strip() == '':
+                    continue
+                elif 'nameserver' in line:
+                    _, unsanitied_nameserver = line.strip().split(' ', 1)
+                    nameserver = unsanitied_nameserver[:-1]  # remove trailing ':'
+                    result[nameserver] = {}
+                else:
+                    key, val = line.split(':', 1)
+                    current_nameserver_stats = result[nameserver]
+                    current_nameserver_stats[key.strip()] = val.strip()
+                    result[nameserver] = current_nameserver_stats
+            except ValueError:
+                continue
+
+        return result
 
     def get_server_info(self):
         result = {}
@@ -215,6 +162,7 @@ def get_stats(module_config):
     try:
         server_info = haproxy.get_server_info()
         server_stats = haproxy.get_server_stats()
+        resolver_stats = haproxy.get_resolvers()
     except socket.error:
         collectd.warning('status err Unable to connect to HAProxy socket at %s' % module_config['socket'])
         return stats
@@ -228,49 +176,35 @@ def get_stats(module_config):
 
     # proxy specific stats
     for statdict in server_stats:
-        dimensions = _build_dimension_dict(statdict)
-        if not (('svname' in statdict and statdict['svname'].lower() in module_config['proxy_monitors']) or
-                ('pxname' in statdict and statdict['pxname'].lower() in module_config['proxy_monitors'])):
+        if not should_capture_metric(statdict, module_config):
             continue
         for metricname, val in statdict.items():
             try:
-                stats.append((metricname, int(val), dimensions))
+                stats.append((metricname, int(val), statdict))
             except (TypeError, ValueError):
                 pass
 
+    for resolver, resolver_stats in resolver_stats.iteritems():
+        for metricname, val in resolver_stats.items():
+            try:
+                stats.append((metricname, int(val), {'is_resolver': True, 'nameserver': resolver}))
+            except (TypeError, ValueError):
+                pass
     return stats
 
 
-def _build_dimension_dict(statdict):
-    """
-    Builds dimensions dict to send back with metrics with readable metric names
-    Args:
-    statdict dictionary of metrics from HAProxy to be filtered for dimensions
-    """
+def should_capture_metric(statdict, module_config):
+    return (('svname' in statdict and statdict['svname'].lower() in module_config['proxy_monitors']) or
+            ('pxname' in statdict and statdict['pxname'].lower() in module_config['proxy_monitors']) or
+            is_backend_server_metric(statdict) and 'backend' in module_config['proxy_monitors'])
 
-    dimensions = {}
 
-    for key in DIMENSIONS_LIST:
-        if key in statdict and key == 'pxname':
-            dimensions['proxy_name'] = statdict['pxname']
-        elif key in statdict and key == 'svname':
-            dimensions['service_name'] = statdict['svname']
-        elif key in statdict and key == 'pid':
-            dimensions['process_id'] = statdict['pid']
-        elif key in statdict and key == 'sid':
-            dimensions['server_id'] = statdict['sid']
-        elif key in statdict and key == 'iid':
-            dimensions['unique_proxy_id'] = statdict['iid']
-        elif key in statdict and key == 'type':
-            dimensions['type'] = _get_proxy_type(statdict['type'])
-        elif key in statdict and key == 'addr':
-            dimensions['address'] = statdict['addr']
-        elif key in statdict and key == 'algo':
-            dimensions['algorithm'] = statdict['algo']
-        elif key in statdict:
-            dimensions[key] = statdict[key]
+def is_backend_server_metric(statdict):
+    return 'type' in statdict and _get_proxy_type(statdict['type']) == 'server'
 
-    return dimensions
+
+def is_resolver_metric(statdict):
+    return 'is_resolver' in statdict and statdict['is_resolver']
 
 
 def config(config_values):
@@ -296,10 +230,6 @@ def config(config_values):
             socket = node.values[0]
         elif node.key == "Interval" and node.values[0]:
             interval = node.values[0]
-        elif node.key == "EnhancedMetrics" and node.values[0]:
-            enhanced_metrics = _str_to_bool(node.values[0])
-        elif node.key == "ExcludeMetric" and node.values[0]:
-            excluded_metrics.add(node.values[0])
         elif node.key == "Testing" and node.values[0]:
             testing = _str_to_bool(node.values[0])
         elif node.key == 'Dimension':
@@ -336,21 +266,13 @@ def config(config_values):
                            **interval_kwarg)
 
 
-def _format_dimensions(dimensions):
-    """
-    Formats a dictionary of dimensions to a format that enables them to be
-    specified as key, value pairs in plugin_instance to signalfx. E.g.
-    >>> dimensions = {'a': 'foo', 'b': 'bar'}
-    >>> _format_dimensions(dimensions)
-    "[a=foo,b=bar]"
-    Args:
-    dimensions (dict): Mapping of {dimension_name: value, ...}
-    Returns:
-    str: Comma-separated list of dimensions
-    """
-
-    dim_pairs = ["%s=%s" % (k, v) for k, v in dimensions.iteritems()]
-    return "[%s]" % (",".join(dim_pairs))
+def _format_plugin_instance(dimensions):
+    if is_backend_server_metric(dimensions):
+        return "{0}.{1}.{2}".format("backend", dimensions['pxname'].lower(), dimensions['svname'])
+    elif is_resolver_metric(dimensions):
+        return "nameserver.{0}".format(dimensions['nameserver'])
+    else:
+        return "{0}.{1}".format(dimensions['svname'].lower(), dimensions['pxname'])
 
 
 def _get_proxy_type(type_id):
@@ -381,6 +303,18 @@ def _str_to_bool(val):
     return False
 
 
+def submit_metrics(metric_datapoint):
+    datapoint = collectd.Values()
+    datapoint.type = metric_datapoint['type']
+    datapoint.type_instance = metric_datapoint['type_instance']
+    datapoint.plugin = metric_datapoint['plugin']
+    if 'plugin_instance' in metric_datapoint.keys():
+        datapoint.plugin_instance = metric_datapoint['plugin_instance']
+    datapoint.values = metric_datapoint['values']
+    collectd.debug(pprint.pformat(metric_datapoint))
+    datapoint.dispatch()
+
+
 def collect_metrics(module_config):
     collectd.debug('beginning collect_metrics')
     """
@@ -395,42 +329,20 @@ def collect_metrics(module_config):
 
     for metric_name, metric_value, dimensions in info:
         # assert metric is in valid metrics lists
-        if not metric_name.lower() in DEFAULT_METRICS and not metric_name.lower() in ENHANCED_METRICS:
-            collectd.debug("metric %s is not in either metric list" % metric_name.lower())
+        if metric_name not in METRICS_TO_COLLECT:
+            collectd.debug("metric %s is not in list of metrics to collect" % metric_name.lower())
             continue
 
-        # skip metrics in enhanced metrics mode if not enabled
-        if not module_config['enhanced_metrics'] and metric_name.lower() in ENHANCED_METRICS:
-            continue
-
-        # pull metric name & type from respective metrics list
-        if metric_name.lower() in DEFAULT_METRICS:
-            translated_metric_name, val_type = DEFAULT_METRICS[metric_name.lower()]
-        else:
-            translated_metric_name, val_type = ENHANCED_METRICS[metric_name.lower()]
-
-        # skip over any exlcluded metrics
-        if translated_metric_name in module_config['excluded_metrics']:
-            collectd.debug("excluding metric %s" % translated_metric_name)
-            continue
-
-        # create datapoint and dispatch
-        datapoint = collectd.Values()
-        datapoint.type = val_type
-        datapoint.type_instance = translated_metric_name
-        datapoint.plugin = PLUGIN_NAME
-        dimensions.update(module_config['custom_dimensions'])
-        if len(dimensions) > 0:
-            datapoint.plugin_instance = _format_dimensions(dimensions)
-        datapoint.values = (metric_value,)
-        pprint_dict = {
-                    'plugin': datapoint.plugin,
-                    'plugin_instance': datapoint.plugin_instance,
-                    'type': datapoint.type,
-                    'type_instance': datapoint.type_instance,
-                    'values': datapoint.values
+        metric_datapoint = {
+                    'plugin': PLUGIN_NAME,
+                    'type': METRICS_TO_COLLECT[metric_name],
+                    'type_instance': metric_name.lower(),
+                    'values': (metric_value,)
                 }
-        collectd.debug(pprint.pformat(pprint_dict))
-        datapoint.dispatch()
+        if len(dimensions) > 0:
+            metric_datapoint['plugin_instance'] = _format_plugin_instance(dimensions)
+        collectd.debug(pprint.pformat(metric_datapoint))
+        submit_metrics(metric_datapoint)
+
 
 collectd.register_config(config)
